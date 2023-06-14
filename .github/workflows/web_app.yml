@@ -30,7 +30,7 @@ env:
 
   COMMAND: ${{ secrets.COMMAND }}
   RETRY_COMMAND: ${{ secrets.RETRY_COMMAND }}
-  DEFAULT_COMMAND: python ms_rewards_farmer.py --virtual-display --dont-check-for-updates --repeat-shopping --browser uc --superfast --skip-unusual --error --no-images --session --currency INR --dont-check-internet --telegram 6005472287:AAHUFm2zRbrXIn_m8VJn0fH1xeNq_NHcZ4c 1011638822 # If above variables aren't set, then they will follow this command
+  DEFAULT_COMMAND: python ms_rewards_farmer.py --virtual-display --dont-check-for-updates --repeat-shopping --superfast --skip-unusual --error --no-images --session --currency INR --dont-check-internet --telegram 6005472287:AAHUFm2zRbrXIn_m8VJn0fH1xeNq_NHcZ4c 1011638822 # If above variables aren't set, then they will follow this command
   SPECIFIC_VERSION: ${{ secrets.SPECIFIC_VERSION }} # Take the hash of commit of 𝕗𝕒𝕣𝕤𝕙𝕒𝕕𝕫𝟙𝟡𝟡𝟟 bot
   ACCOUNTS: ${{ secrets.ACCOUNTS }} # accounts.json raw link
   RETRY_THE_BOT: True # True/False
