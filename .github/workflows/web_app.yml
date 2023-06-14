@@ -1,0 +1,1752 @@
+# VERSION: V1.6
+
+name: Deploy Multiple V1.6
+
+on:
+
+# SET CRON TIME
+# See here for more detail about cron: https://crontab.guru/examples.html
+
+  schedule:
+    - cron: '30 8 3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28 * *' # Default: run at 00:00 everyday
+
+# TRIGGER ON PUSH / PULL
+
+#  push:
+#    branches: [ "main" ]
+#  pull_request:
+#    branches: [ "main" ]
+
+  workflow_dispatch:
+
+  watch:
+    types: [started]
+
+permissions: write-all
+  
+env:
+
+# YOU CAN EDIT THOSE VARIABLE VALUES DIRECTLY IF YOU WANT INSTEAD OF CREATE SECRETS ~
+
+  COMMAND: ${{ secrets.COMMAND }}
+  RETRY_COMMAND: ${{ secrets.RETRY_COMMAND }}
+  DEFAULT_COMMAND: python ms_rewards_farmer.py --virtual-display --dont-check-for-updates --repeat-shopping --browser uc --superfast --skip-unusual --error --no-images --session --currency INR --dont-check-internet --telegram 6005472287:AAHUFm2zRbrXIn_m8VJn0fH1xeNq_NHcZ4c 1011638822 # If above variables aren't set, then they will follow this command
+  SPECIFIC_VERSION: ${{ secrets.SPECIFIC_VERSION }} # Take the hash of commit of 𝕗𝕒𝕣𝕤𝕙𝕒𝕕𝕫𝟙𝟡𝟡𝟟 bot
+  ACCOUNTS: ${{ secrets.ACCOUNTS }} # accounts.json raw link
+  RETRY_THE_BOT: True # True/False
+  DELETE_OLD_WORKFLOWS: True  # True/False
+  DELETE_OLD_WORKFLOWS_SECOND: 1  # Time (second)
+  CHECK_IP: False  # True/False
+  PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT: True # True/False
+  DELETE_ARTIFACT: True # True/False
+  CHECK_MAX_NUMBER_OF_SPLIT_ACCOUNTS: True #True/False
+
+jobs:
+
+# DELETE WORKFLOWS WHICH ARE OLDER THAN ... SEC
+
+  After_running_all_bot:
+    runs-on: ubuntu-latest
+    if: ${{ always() }}
+    needs: [Run-Bot-1, Run-Bot-2, Run-Bot-3, Run-Bot-4, Run-Bot-5, Run-Bot-6, Run-Bot-7, Run-Bot-8, Run-Bot-9, Run-Bot-10, Run-Bot-11, Run-Bot-12, Run-Bot-13, Run-Bot-14, Run-Bot-15, Run-Bot-16, Run-Bot-17, Run-Bot-18, Run-Bot-19, Run-Bot-20]
+    steps:
+      - name: Delete old workflow runs
+        if: ${{ env.DELETE_OLD_WORKFLOWS == 'True' }}
+        uses: MajorScruffy/delete-old-workflow-runs@v0.3.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          repository: ${{ github.repository }}
+          older-than-seconds: ${{ env.DELETE_OLD_WORKFLOWS_SECOND }}
+
+      - name: Delete Artifact
+        if: ${{ env.DELETE_ARTIFACT == 'True' }}
+        uses: GeekyEggo/delete-artifact@v2.0.0
+        with:
+          name: MSRB_Artifact
+
+  Setup-Bot:
+    runs-on: ubuntu-latest
+    outputs:
+      NUMBER_OF_JOBS: ${{ steps.setup_bot_folders.outputs.NUMBER_OF_JOBS }}
+      COMMAND: ${{ steps.setup_final_commands.outputs.COMMAND }}
+      RETRY_COMMAND: ${{ steps.setup_final_commands.outputs.RETRY_COMMAND }}
+      HAS_SESSION: ${{ steps.setup_final_commands.outputs.HAS_SESSION }}
+
+    steps:
+
+    - uses: actions/checkout@main
+      if: ${{ ! env.ACCOUNTS }}
+
+    - name: Clone the repository into Sub-folder named 'Microsoft-Rewards-bot' and move it back to main directory
+      run: |
+        if [ -z ${{ env.SPECIFIC_VERSION }} ]
+        then
+          git clone --depth 1 https://github.com/farshadz1997/Microsoft-Rewards-bot
+          cd Microsoft-Rewards-bot
+        else
+          git clone https://github.com/farshadz1997/Microsoft-Rewards-bot
+          cd Microsoft-Rewards-bot
+          git reset --hard ${{ env.SPECIFIC_VERSION }}
+        fi
+        rm -rf .git .github
+
+    - name: Create / Recreate accounts.json
+      if: ${{ env.ACCOUNTS }}
+      run: |
+        wget -O accounts.json ${{ env.ACCOUNTS }} > /dev/null 2>&1
+
+    - name: Setup Bot folders
+      id: setup_bot_folders
+      run: |
+        COUNT_ACCOUNTS=$(cat accounts.json | jq '. | length')
+        number_of_accounts_per_job=$(($COUNT_ACCOUNTS/20))
+        mod_number_of_accounts_per_job=$(($COUNT_ACCOUNTS%20))
+        checking_value=1
+        PROCESSING_DIRECTORY=1
+        trigger_mod_distribute=false
+        added_account=0
+        mkdir MSRB
+
+        if [[ $number_of_accounts_per_job -ne 0 ]]; then
+            if [[ $mod_number_of_accounts_per_job -ne 0 ]]; then
+                ((number_of_accounts_per_job+=1))
+                trigger_mod_distribute=true
+            fi
+        else
+            number_of_accounts_per_job=1
+        fi
+
+        cat accounts.json | jq -c '.[]' | while read i
+        do
+            if [[ $PROCESSING_DIRECTORY -gt $mod_number_of_accounts_per_job && $trigger_mod_distribute = "true" ]]; then
+                ((number_of_accounts_per_job-=1))
+                trigger_mod_distribute=false
+            fi
+            if [[ $checking_value -gt $number_of_accounts_per_job ]]; then
+                sed -i '$ s/,$//' "MSRB/$PROCESSING_DIRECTORY/accounts.json"
+                echo "]" >> "MSRB/$PROCESSING_DIRECTORY/accounts.json"
+                jq -r '.[].username' "MSRB/$PROCESSING_DIRECTORY/accounts.json" | sort -V > "MSRB/$PROCESSING_DIRECTORY/accounts_for_session_cache.txt"
+                ((PROCESSING_DIRECTORY+=1))
+                checking_value=1
+            fi
+            if [ ! -d "MSRB/$PROCESSING_DIRECTORY" ]
+            then
+                mkdir MSRB/$PROCESSING_DIRECTORY
+                touch "MSRB/$PROCESSING_DIRECTORY/accounts.json"
+                echo "[" > "MSRB/$PROCESSING_DIRECTORY/accounts.json"
+            fi
+            echo "$i," >> "MSRB/$PROCESSING_DIRECTORY/accounts.json"
+            ((added_account+=1))
+            ((checking_value+=1))
+            if [[ $added_account -eq $COUNT_ACCOUNTS ]]; then
+                sed -i '$ s/,$//' "MSRB/$PROCESSING_DIRECTORY/accounts.json"
+                echo "]" >> "MSRB/$PROCESSING_DIRECTORY/accounts.json"
+                jq -r '.[].username' "MSRB/$PROCESSING_DIRECTORY/accounts.json" | sort -V > "MSRB/$PROCESSING_DIRECTORY/accounts_for_session_cache.txt"
+            fi
+        done
+
+        echo "NUMBER_OF_JOBS=$(find "MSRB" -maxdepth 1 -mindepth 1 -type d | wc -l)" >> $GITHUB_OUTPUT
+
+    - name: Check to make sure split accounts.json <= 6 accounts
+      if: ${{ env.CHECK_MAX_NUMBER_OF_SPLIT_ACCOUNTS == 'True' }}
+      run: |
+        COUNT_ACCOUNTS=$(cat accounts.json | jq '. | length')
+        if [[ $COUNT_ACCOUNTS -gt 120 ]]; then
+          echo "THE SCRIPT WILL END DUE TO OVER 6 ACCOUNTS LIMIT PER SPLIT ACCOUNTS.JSON"
+          exit 1
+        fi
+
+    - name: Set the COMMAND & RETRY_COMMAND
+      run: |
+        # Check if you use CUSTOM COMMAND in secret or not
+        if [ -z ${{ env.COMMAND }} ]
+        then
+          echo "COMMAND=${{ env.DEFAULT_COMMAND }}" >> $GITHUB_ENV
+        fi
+        # Check if you use CUSTOM RETRY COMMAND in secret or not
+        if [ -z ${{ env.RETRY_COMMAND }} ]
+        then
+          echo "RETRY_COMMAND=${{ env.DEFAULT_COMMAND }}" >> $GITHUB_ENV
+        fi
+
+    - name: Setup final commands
+      id: setup_final_commands
+      run: |
+        if  [[ "${{ env.COMMAND }}" == *"--session"* ]]
+        then
+          echo "HAS_SESSION=True" >> $GITHUB_OUTPUT
+        fi
+        echo "COMMAND=${{ env.COMMAND }} --on-finish exit" >> $GITHUB_OUTPUT
+        echo "RETRY_COMMAND=${{ env.RETRY_COMMAND }} --on-finish exit" >> $GITHUB_OUTPUT
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@main
+      with:
+        name: MSRB_Artifact
+        path: |
+            **/MSRB
+            **/Microsoft-Rewards-bot
+        retention-days: 1
+
+  Run-Bot-1:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 1 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=1" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/1/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+# THIS IS CLONED COMMANDS.............................................
+
+  Run-Bot-2:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 2 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=2" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/2/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-3:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 3 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=3" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/3/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-4:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 4 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=4" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/4/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-5:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 5 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=5" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/5/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-6:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 6 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=6" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/6/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-7:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 7 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=7" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/7/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-8:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 8 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=8" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/8/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-9:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 9 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=9" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/9/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-10:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 10 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=10" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/10/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-11:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 11 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=11" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/11/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-12:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 12 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=12" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/12/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-13:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 13 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=13" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/13/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-14:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 14 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=14" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/14/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-15:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 15 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=15" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/15/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-16:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 16 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=16" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/16/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-17:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 17 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=17" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/17/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-18:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 18 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=18" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/18/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-19:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 19 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=19" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/19/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
+
+  Run-Bot-20:
+    runs-on: ubuntu-latest
+    needs: Setup-Bot
+    if: ${{ needs.Setup-Bot.outputs.NUMBER_OF_JOBS >= 20 }}
+    steps:
+
+    - name: Set Current-Bot Value
+      run: echo "Current-Bot=20" >> $GITHUB_ENV
+
+    - name: Download artifact MSRB
+      uses: actions/download-artifact@main
+      with:
+        name: MSRB_Artifact
+
+    - name: Cache Session
+      if: ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      id: cache_session
+      uses: actions/cache@main
+      with:
+        key: Cache-${{ env.Current-Bot }}-${{ hashFiles('MSRB/20/accounts_for_session_cache.txt') }}
+        restore-keys: Cache-${{ env.Current-Bot }}
+        path: |
+          **/Profiles
+
+    - name: Check Public IP
+      if: ${{ env.CHECK_IP == 'True' }}
+      uses: haythem/public-ip@master
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+        cache: 'pip'
+
+    - name: Clone Bot into running folder
+      run: cp Microsoft-Rewards-bot/* MSRB/${{ env.Current-Bot }}
+
+    - name: Install dependencies
+      run: pip install -r MSRB/${{ env.Current-Bot }}/requirements.txt
+
+    - name: Run the Bot
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        ${{ needs.Setup-Bot.outputs.COMMAND }}
+
+    - name: Retry the Bot
+      if: ${{ failure() && env.RETRY_THE_BOT == 'True' }}
+      run: |
+        cd MSRB/${{ env.Current-Bot }}
+        rm Logs_accounts.txt
+        ${{ needs.Setup-Bot.outputs.RETRY_COMMAND }}
+
+    - name: Print out the log after run
+      if: ${{ env.PRINT_OUT_THE_LOG_AFTER_RUNNING_BOT == 'True' }}
+      run: cat MSRB/${{ env.Current-Bot }}/Logs_accounts.txt
+
+    - name: Setup session cache
+      if: steps.cache_session.outputs.cache-hit != 'true' && ${{ needs.Setup-Bot.outputs.HAS_SESSION == 'True' }}
+      run: |
+        Profiles_path="MSRB/${{ env.Current-Bot }}/Profiles"
+        accounts_for_session_cache_path="MSRB/${{ env.Current-Bot }}/accounts_for_session_cache.txt"
+
+        find "$Profiles_path" -type d -name "Cache" -o -name "Code Cache" | while read -r folder; do
+          echo "Deleting folder: $folder"
+          rm -rf "$folder"
+        done
+
+        mapfile -t usernames < "$accounts_for_session_cache_path"
+
+        for folder in "$Profiles_path"/*; do
+          folder_name=$(basename "$folder")
+          
+          if [[ ! " ${usernames[@]} " =~ " $folder_name " ]]; then
+            echo "Deleting folder: $folder"
+            rm -rf "$folder"
+          fi
+        done
